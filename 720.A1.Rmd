@@ -1,0 +1,620 @@
+---
+title: "Homework Assignment 1"
+author: |
+  | Greg Forkutza
+  | Student ID: 400277514
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  pdf_document:
+    citation_package: natbib
+    latex_engine: xelatex
+    toc: true 
+    toc_depth: 2  
+fontsize: 10pt
+linestretch: 1.5
+geometry: margin=1in
+urlcolor: blue
+header-includes:
+  - "\\usepackage[nottoc]{tocbibind}"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+require(datasets)
+require(MASS)
+require(tidyverse)
+require(knitr)
+require(ggrepel)
+require(knitr)
+require(kableExtra)
+require(performance)
+require(dotwhisker)
+require(effects)
+require(mgcv)
+require(splines)
+require(lmtest)
+```
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(warning=FALSE, error=FALSE)
+```
+
+# 1
+
+`dataset::longley` is a macroeconomic data set with 7 economical variables, 
+observed yearly from 1947 to 1962. 
+
+```{r}
+head(longley)
+```
+
+## (a)
+
+We first run a linear model, using the employment numbers as the response on all 
+the rest of the variables. Then we show using
+VIF that there is multi-collineairty.
+```{r}
+
+# Liner model for original data
+m1 <- lm(Employed ~ . , data = longley)
+summary(m1)
+```
+
+It is suspicious that all of the coefficients are quite small. Furthermore the 
+t values are quite small for some of the variables. If we look at the
+correlation plot for predictors we see
+```{r}
+data <- longley %>% 
+        select(-Employed)
+```
+
+```{r}
+# Define function to convert covariance matrix to correlation matrix. 
+ 
+cov_to_cor <- function(covmat) {
+  
+   # Extract std dev's and name   
+     SD <- diag(covmat) %>% 
+           sqrt()
+     names(SD) <- colnames(covmat)
+  
+  # Extract dimensions of covariance matrix
+  nrow <- dim(covmat)[1]
+  ncol <- dim(covmat)[2]
+  
+  # Scale the covariance matrix
+  for (i in 1: nrow ) {
+    for (j in 1:ncol) {
+      scale <- SD[i] * SD[j]
+      covmat[i,j] <- covmat[i,j] / scale
+  }
+  }   
+  return(covmat)
+}
+```
+
+```{r}
+corrplot::corrplot(cov_to_cor(cov(data)))
+```
+
+We observe that GNP.deflator, GNP and Population are very correlated in
+the correlation plot and also have small t-values for their corresponding
+coefficients in the linear model. 
+
+Now us compute the Variance Inflation Factor (VIF) for the predictors. 
+It is a useful measure of multicollinearity in a data set.
+The VIF is the ratio of the variance of estimating some parameter in a model
+that includes multiple other predictors by the variance of a model constructed
+using only one term. It is defined as 
+$$VIF = \frac{1}{1-R^{2}},$$ where $R^{2}$ is the coefficient of determination.
+
+```{r}
+
+compute_vif <- function(data, response_col) {
+  # Drop the response variable to get only predictors
+  predictors <- data %>% 
+                select(-response_col)
+  
+  # Initialize an empty vector to store VIF values
+  vif_values <- numeric(ncol(predictors))
+  
+  # Loop through each predictor to calculate its VIF
+  for (i in seq_along(predictors)) {
+    
+    # Isolate the predictor of interest
+    predictor_of_interest <- names(predictors)[i]
+    
+    # Create a formula to regress the predictor of interest on all other predictors
+    formula <- as.formula(paste(predictor_of_interest, "~ ."))
+    
+    # Fit the linear model
+    lm_model <- lm(formula, data = predictors)
+    
+    # Compute R-squared
+    r_squared <- summary(lm_model)$r.squared
+    
+    # Compute VIF
+    vif_values[i] <- 1 / (1 - r_squared)
+  }
+  
+  # Add names
+  names(vif_values) <- names(predictors)
+  
+  return(vif_values)
+}
+
+# Compute VIF values
+vif_results <- compute_vif(longley, "Employed")
+print(vif_results)
+```
+
+
+The rule of thumb is that a VIF value above 5-10 indicates multicollinearity 
+between that predictor and the other predictors. We observe that all variables
+other than Armed.Forces are >>10.
+
+Since the predictors are correlated and that makes our estimates of coefficients
+correlated, we can remove the multi-collinearity by using principal components
+as the predictors in our linear model. Therefore we will use all the predictors.
+After we compute the principal components we will interpret them in terms of
+the original predictors. We will do PCA using both the covariance
+and the correlation matrix, so they can be compared downstream when fitting 
+the linear model. 
+
+```{r,echo = FALSE}
+
+# Remove the response variable
+data <- longley %>%
+        select(-"Employed")
+
+#
+covmat <- cov(data)
+
+# Compute correlation matrix and round to 3 sig figs. 
+cormat <- cov_to_cor(ability.cov$cov) %>%
+          round(., 3)
+
+
+
+# Obtain eigenvales and eigenvectors of cormat
+ei <- eigen(cormat)
+evalues <-round((ei$values),3)
+evectors <- round((ei$vectors),3)
+
+# Obtain eigenvalues and eigenvectors of covmat
+ei_cov <- eigen(covmat)
+evalues_cov <- round((ei_cov$values),3)
+evectors_cov <- round((ei_cov$vectors),3)
+
+```
+
+```{r}
+# Define function to compute proportion of total population variation due to the 
+# k'th principal component.
+prop_pc <- function(mat) {
+  ei <- eigen(mat)
+  evalues <- ei$values
+  total <- sum(evalues)
+  dim <- length(diag(mat))
+  vec <- rep(NA, dim)
+  
+  for (i in 1:dim) {
+  vec[i] <- evalues[i]/total
+  }
+  return(vec)
+  
+}
+```
+
+
+```{r, echo = FALSE}
+#Compute proportion of total population variation due to the k'th principal 
+ prop_cov <- prop_pc(covmat)
+ names(prop_cov)<-c("Component 1", "Component 2", "Component 3", "Component 4", 
+                "Component 5", "Component 6")
+```
+
+```{r pca-table_cov, results='asis', echo = FALSE}
+prop_df_cov <- data.frame(Component = names(prop_cov), Proportion = prop_cov, row.names
+                      = NULL)
+knitr::kable(prop_df_cov, 
+             caption = "Proportions of Variance Explained by Components
+            (Covariance Matrix)", 
+             digits = 2)
+
+```
+
+```{r, echo = FALSE}
+#Compute proportion of total population variation due to the k'th principal 
+ prop <- prop_pc(cormat)
+ names(prop)<-c("Component 1", "Component 2", "Component 3", "Component 4", 
+                "Component 5", "Component 6")
+```
+
+```{r pca-table, results='asis', echo = FALSE}
+prop_df <- data.frame(Component = names(prop), Proportion = prop, row.names
+                      = NULL)
+knitr::kable(prop_df, 
+             caption = "Proportions of Variance Explained by Components 
+             (Correlation Matrix)", 
+             digits = 2)
+
+```
+
+
+
+```{r, echo = FALSE}
+# Scree Plot
+
+# Convert proportions to data frame
+df_prop_cov <- as.data.frame(prop_cov) %>%
+  rownames_to_column("Component") %>%
+  rename(Proportion = prop_cov) 
+
+# Create Scree plot
+ggplot(df_prop_cov, aes(x = Component, y = Proportion)) + 
+  geom_point() + 
+  geom_line(aes(group = 1)) +
+  theme_minimal() +
+  labs(title = "Scree Plot (Covariance Matrix)",
+       y = "Proportion of Explained Variance",
+       x = "Principal Component")
+
+```
+
+```{r, echo = FALSE}
+# Scree Plot
+
+# Convert proportions to data frame
+df_prop <- as.data.frame(prop) %>%
+  rownames_to_column("Component") %>%
+  rename(Proportion = prop)
+
+# Create Scree plot
+ggplot(df_prop, aes(x = Component, y = Proportion)) + 
+  geom_point() + 
+  geom_line(aes(group = 1)) +
+  theme_minimal() +
+  labs(title = "Scree Plot  (Correlation Matrix)",
+       y = "Proportion of Explained Variance",
+       x = "Principal Component")
+```
+
+
+```{r, echo = FALSE}
+# Build eigenvector matrix for first two principal components 
+eigenvectors_cov <- evectors_cov[,1:2]
+
+colnames(eigenvectors_cov) <- c("Component 1", "Component 2")
+names <- colnames(data)
+rownames(eigenvectors_cov) <- names
+# Display with kable
+kable(as.data.frame(eigenvectors_cov), 
+      caption = "Eigenvectors for the First Two Principal Components  (Covariance)", 
+      digits = 3)
+```
+
+```{r, echo = FALSE}
+# Build eigenvector matrix for first four principal components 
+eigenvectors <- evectors[,1:3]
+
+colnames(eigenvectors) <- c("Component 1", "Component 2", "Component 3")
+names <- colnames(data)
+rownames(eigenvectors) <- names
+# Display with kable
+kable(as.data.frame(eigenvectors), 
+      caption = "Eigenvectors for the First Four Principal Components (Correlation)", 
+      digits = 3)
+```
+
+| Method | Component | Interpretation |
+|--------|-----------|----------------|
+| Covariance-based Eigenvectors | Component 1 | Strong negative loadings on GNP and Unemployed. This component might capture general economic factors related to both the gross national product and unemployment. |
+| Covariance-based Eigenvectors | Component 2 | Strong  positive loadings on Armed.Forces,moderate  positive loading on GNP and moderate negative loading on Unemployed. This component may capture factors related to the military and the economy. |
+| Correlation-based Eigenvectors | Component 1 | Strong loadings on almost all variables except for Armed.Forces. This could be a "general factor" capturing broad economic and demographic aspects. |
+| Correlation-based Eigenvectors | Component 2 | Strong negative loadings on Population and Year, and positive loadings on GNP, Unemployed, and Armed.Forces. This might capture more specific year-over-year changes or economic factors separate from demographic growth. |
+| Correlation-based Eigenvectors | Component 3 | Strong negative loading on Armed.Forces and strong positive loading on GNP. This could represent aspects of the economy not associated with military activity. |
+
+\newpage
+## (b)
+
+```{r variable description table, echo = FALSE, results='asis'}
+
+# Create data frame as before
+var_info <- data.frame(
+  Variable = c("GNP.deflator", "GNP", "Unemployed", "Armed.Forces", "Population", "Year", "Employed"),
+  Description = c("Gross National Product implicit price deflator", 
+                  "Gross National Product", 
+                  "Number of unemployed", 
+                  "Number of people in the armed forces", 
+                  "Non-institutionalized population", 
+                  "Year of the observation", 
+                  "Number of people employed"),
+  Unit = c("Index (year 1954 = 100)", 
+           "Billions of USD", 
+           "Thousands of people", 
+           "Thousands of people", 
+           "Thousands of people", 
+           "Years", 
+           "Thousands of people"),
+  Interpretation = c("Measure of level of prices", 
+                     "Total value of goods and services", 
+                     "People looking for a job", 
+                     "People in the military", 
+                     "People outside institutions", 
+                     "Year recorded", 
+                     "People who have jobs"),
+  Threshold = c("1 index point", 
+                "0.5 Billion USD", 
+                "1K people", 
+                "1K people", 
+                "1K people", 
+                "1 Year", 
+                "1K people")
+)
+
+# Create table using kable and kableExtra
+kable(var_info, 
+      caption = "Description of Variables in the Longley Dataset", 
+      col.names = c("Variable", "Description", "Unit", "Interpretation", "Threshold"), 
+      booktabs = TRUE) %>% 
+  kable_styling(latex_options = c("scale_down","HOLD_position"))
+
+```
+
+## (c)
+
+
+```{r}
+# Center and Scale data
+data_sc <- scale(data)
+
+# Transform data with eigenvectors for covariation matrix
+pc_scores_cov <- data_sc %*% eigenvectors_cov
+
+# Transform data with eigenvectors for correlation matrix
+pc_scores_cor <- data_sc %*% eigenvectors
+
+# Fit new lm
+response <- longley$Employed
+
+mod_pc_cov <- lm(response ~ pc_scores_cov)
+mod_pc_cor  <- lm(response ~ pc_scores_cor)
+summary(mod_pc_cov)
+summary(mod_pc_cor)
+```
+
+Both models seem to fit the data well. The $R^{2}$ value is high for both models
+but for the correlation model $R^{2} = 99.85%$ is very high. Both models 
+show significant t-values for their coefficients, 
+indicating that the selected principal components are
+important predictors for the employment rate in both cases. 
+
+\newpage
+## (d)
+
+```{r, fig.height=7}
+check_cov <- performance::check_model(mod_pc_cov)
+par(mfrow= c(2,2))
+plot(check_cov, title = "PCR (Covariance")
+```
+
+```{r, fig.height=7}
+check_cor <- performance::check_model(mod_pc_cor)
+par(mfrow= c(2,2))
+plot(check_cor, title = "PCR (Correlation)")
+
+```
+The posterior check looks much better for the correlation PCR (PCRcor) then
+for the covariance PCR (PCRcov). The linearity for PCRcov has wider CI's but
+it is more rectangular then PCRcor which appears fairly non-linear after in
+the upper half. A similar argument holds for the homogeneity of variance. The 
+PCRcor model appears to have a borderline influential observation for the 16th 
+data point. The PCRcov model does not appear to any influential observation.
+The  normality of residuals is very good for both model except that PCRcor has
+an extreme looking point on both side of the 2nd quantile. 
+
+
+
+
+\newpage
+## (e)
+
+We will not drop any observations but for curiosity sake lets drop the possible
+influential observation for PCRcor and refit the model. 
+
+```{r, fig.height=7}
+data2 <- data_sc[1:15,] 
+pc_scores_cor2 <- data2 %*% eigenvectors
+response2<- response[1:15]
+mod_pc_cor2  <- lm(response2 ~ pc_scores_cor2)
+summary(mod_pc_cor)
+check_cor2 <- performance::check_model(mod_pc_cor2)
+par(mfrow= c(2,2))
+plot(check_cor2, title = "PCR (Correlation)")
+```
+
+We see that the linearity and the homogeneity of variance both looks better now.
+
+\newpage
+## (f)
+
+The data is scaled and centered as is custom when working with principal 
+components. 
+
+```{r, echo = FALSE}
+
+dwplot(mod_pc_cov)
+
+dwplot(mod_pc_cor)
+```
+
+\newpage
+## (g)
+
+```{r}
+#effect() was very picky so had to make some changes below to make it happy.
+
+# Rename columns to remove spaces  and convert matrix to data frame
+colnames(pc_scores_cov)<- c("Component1", "Component2")
+pc_scores_cov_df <- as.data.frame(pc_scores_cov)
+
+colnames(pc_scores_cor)<- c("Component1", "Component2", "Component3")
+pc_scores_cor_df <- as.data.frame(pc_scores_cor)
+
+
+# Fitting the model using the data frame
+mod_pc_cov_updated <- lm(formula = response ~ Component1 + Component2, 
+                         data = pc_scores_cov_df)
+mod_pc_cor_updated <- lm(formula = response ~ Component1 + Component2 + 
+                           Component3, 
+                         data = pc_scores_cor_df)
+
+# Creating the effect objects for each component
+eff1_cov <- effect("Component1", mod_pc_cov_updated)
+eff2_cov <- effect("Component2", mod_pc_cov_updated)
+
+eff1_cor <- effect("Component1", mod_pc_cor_updated)
+eff2_cor <- effect("Component2", mod_pc_cor_updated)
+eff3_cor <- effect("Component3", mod_pc_cor_updated)
+
+# Plotting the effect for each component
+par(mfrow = c(3,2))
+plot(eff1_cov)
+plot(eff2_cov)
+plot(eff1_cor)
+plot(eff2_cor)
+plot(eff3_cor)
+
+```
+
+For PCRcov we see that the main effect for the 1st principal component has a 
+large negative magnitude. This makes sense at the corresponding eigenvector
+had large negative loadings on `Unemploymed` and `GNP`. Therefore when 
+`Unemploymed` and `GNP` are low, employment is high. 
+in this component are associated with higher employment. The 2nd principal 
+component has a large positive loading on `Armed.Forces` and a moderate 
+negative loading on `Unemployed`. Therefore when unemployment is low and 
+enrollment in armed forces is high , this component is associated with low 
+employment. 
+
+A similar interpreation can be done for the correlation plot (which I will not
+do).
+
+
+
+
+\newpage
+# 2
+
+```{r}
+# Create a data frame with the unique combinations of Period and Treatment
+design <- expand.grid(
+  Period = factor(c("Before", "After")),
+  Treatment = factor(c("Control", "Impact"))
+)
+
+# Define the contrasts for Period and Treatment 
+contrasts(design$Period) <- matrix(c(-1, 1), 2)
+contrasts(design$Treatment) <- matrix(c(-1, 1), 2)
+
+# Construct the minimal model matrix 
+model_matrix_1 <- model.matrix(~ Period * Treatment, design)
+print(model_matrix_1)
+```
+
+First consider `model_matrix_1` for the model `~ Period * Treatment`. 
+The first column 
+of 1s represents the intercept. This is used to estimate the average value of
+`Control` and `Impact` during the `Before` period. The second column indicates
+the effect of moving from `Control` to `Impact` within the `Before` period. The 
+contrast matrix for `Period` is set up to estimate the difference 
+,$(\bar{\mu}{A}-\bar{\mu}{B})$. The third column  indicates the effect of moving
+from `Before` to `After`, averaged over the `Control` and `Impact`. The contrast
+matrix for `Period` is set up to estimate the difference,
+$(\delta(\mu_{A})-\delta(\mu_{B}))$. The fourth column represents the 
+interaction between `Period` and `Treatment`. It estimates the difference
+in the difference `Control`-`Impact` between the `Before` and `After` periods. 
+Therefore `model_matrix_1` allows for estimating the intercept, main effects
+and interaction. 
+
+\newpage
+
+```{r}
+# Create the model matrix for ~ 0 + Period:Treatment
+model_matrix_2 <- model.matrix(~ 0 + Period:Treatment, design)
+print(model_matrix_2)
+```
+
+`model_matrix_2` for the model `~ 0 + Period * Treatment` does not have an
+intercept. 
+Each column includes a single 1 for each of the 4 possible interactions. 
+This means you can only estimate the interaction effect between `Period`
+and `Treatment`. 
+
+\newpage
+# 3
+
+```{r}
+set.seed(123)
+
+# Function to simulate data with different levels of violation
+simulate_data <- function(n=100 , violation_level=1) {
+  x <- rnorm(n)  
+  epsilon <- rnorm(n, mean = 0, sd = abs(violation_level * x))
+  y <- 2 * x + 3 + epsilon 
+  data.frame(x, y)
+}
+
+# Simulate
+simulate <- function(n_sims=1000, violation_level=1,alpha = 0.05) {
+  true_slope <- 2
+  slopes <- numeric(n_sims)
+  coverages <- numeric(n_sims)
+  reject_null <- numeric(n_sims)
+
+  for (i in 1:n_sims) {
+    data <- simulate_data(violation_level = violation_level)
+    model <- lm(y ~ x, data = data)
+    slopes[i] <- coef(model)[2]
+    conf_int <- confint(model)[2, ]
+    coverages[i] <- conf_int[1] <= true_slope && conf_int[2] >= true_slope
+    test <- bptest(model)  
+    reject_null[i] <- test$p.value < alpha 
+  }
+
+  bias <- mean(slopes - true_slope)
+  rmse <- sqrt(mean((slopes - true_slope)^2))
+  coverage <- mean(coverages)
+  power <- mean(reject_null) 
+  
+  list(bias = bias, rmse = rmse, coverage = coverage, power = power)
+}
+
+# Run the simulation with different levels of violation
+results <- data.frame(violation_level = numeric(), 
+                      bias = numeric(), 
+                      rmse = numeric(), 
+                      coverage = numeric(),
+                      power = numeric())
+for (violation_level in seq(1, 10, by = 1)) {
+  result <- simulate(violation_level = violation_level)
+  results <- rbind(results, data.frame(violation_level, bias = result$bias,
+                                       rmse = result$rmse, 
+                                       coverage = result$coverage, 
+                                       power = result$power))
+}
+print(results)
+```
+
+```{r, echo = FALSE}
+ggplot(results) +
+  geom_line(aes(x = violation_level, y = bias, color = "Bias")) +
+  geom_line(aes(x = violation_level, y = rmse, color = "RMSE")) +
+  geom_line(aes(x = violation_level, y = coverage, color = "Coverage")) +
+  geom_line(aes(x = violation_level, y = power, color = "Power")) +
+  labs(y = "Value", x = "Level of Violation", color = "Metric", 
+       title = "Effect of Violating Heteroscedasticity on BIAS, Coverage,
+                RMSE and Power by the function f(x) = violation level * sd" ) +
+  theme_minimal()
+```
