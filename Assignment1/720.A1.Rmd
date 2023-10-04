@@ -39,6 +39,8 @@ require(lmtest)
 knitr::opts_chunk$set(warning=FALSE, error=FALSE)
 ```
 
+**BMB**: table of contents is a little bit of overkill?
+
 # 1
 
 `dataset::longley` is a macroeconomic data set with 7 economical variables, 
@@ -60,7 +62,9 @@ m1 <- lm(Employed ~ . , data = longley)
 summary(m1)
 ```
 
-It is suspicious that all of the coefficients are quite small. Furthermore the 
+It is suspicious that all of the coefficients are quite small. 
+(**BMB**: why? doesn't that depend on the units of the predictors and response variable?)
+Furthermore the 
 t values are quite small for some of the variables. If we look at the
 correlation plot for predictors we see
 ```{r}
@@ -389,6 +393,8 @@ but for the correlation model $R^{2} = 99.85%$ is very high. Both models
 show significant t-values for their coefficients, 
 indicating that the selected principal components are
 important predictors for the employment rate in both cases. 
+
+**BMB**: I would have said that with 15 observations and 6 potential predictors, you should have decided immediately that you needed to reduce the number of covariates ...
 
 \newpage
 ## (d)
