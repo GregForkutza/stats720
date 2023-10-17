@@ -104,7 +104,7 @@ ggplot(kyphosis, aes(x = Kyphosis, y = Start, group = Kyphosis)) +
 ## c
 
 The model can be simplified ever further.
-As in in \cite{hastie1990generalized}, we can see above that when we plot 
+As in \cite{hastie1990generalized}, we can see above that when we plot 
 the smooth terms against the effect on the log odds of `Kyphosis`
 that `Age` is approximately quadratic. `Start` can be divided into two groups, 
 the thoracic vertebrae $ start \leq 12$ and the lumbar vertebrae $ start > 12$. 
@@ -353,7 +353,7 @@ p <- ggplot(g_data, aes(x = prev, y = shells, color = Site)) +
        x = "Seroprevalence of M. agassizi",
        y = "Number of Fresh Shells Found") +
   theme_minimal() +
-  scale_shape_manual(values = c(16, 17, 18)) # Manual shape for different years
+  scale_shape_manual(values = c(16, 17, 18)) 
 
 print(p)
 ```
@@ -761,7 +761,7 @@ bound to try to make the predicted probability of the outcome
 (`HG` being $1$ for $NV = 1$) as close to 1 as possible. 
 This is why the estimate of the effect of NV becomes infinite or very large
 for `glm()` with `method = "IWLS"`. Instead we can modify the score equation
-$ \partial log L / \partial \beta_{r} \equiv U(\beta_{r}) = 0$. Firth suggested 
+$ \partial log L  \partial \beta_{r} \equiv U(\beta_{r}) = 0$. Firth suggested 
 basing estimation on a modified score equation 
 $$U(\theta_r)^* \equiv U(\theta_{r+1}) = \frac{1}{2} \mathrm{trace} \left[ I(\theta)^{-1} \{\partial I(\theta) = \partial \theta_r\} \right] = 0 \quad (\text{for } r = 1, \ldots, k),$$
 This modified score function is connected to the penalized likelihood. 
@@ -778,7 +778,7 @@ this utilizes Firths penalty of half the trace of a particular matrix product,
 to adjust the parameters estimates in the case of our quasi-complete seperation.
 Similarly `arm::bayesglm()` uses a non-informative prior assumption
 to regularize the coefficients and pull them slightly towards zero. Gelman 
-\cite{{gelman2008weakly} recommends to put a cauchy prior with median $0$ and 
+\cite{gelman2008weakly} recommends to put a cauchy prior with median $0$ and 
 scale $2.5$ on each coefficient. This is how `arm::bayesglm()` solves
 the seperation problem.
 
