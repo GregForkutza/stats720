@@ -1,5 +1,5 @@
 ---
-title: "Homework Assignment 1"
+title: "Homework Assignment 2"
 author: |
   | Greg Forkutza
   | Student ID: 400277514
@@ -777,7 +777,7 @@ If instead we instead set `method = brglmFit"`  for `stats::glm()`, then
 this utilizes Firths penalty of half the trace of a particular matrix product, 
 to adjust the parameters estimates in the case of our quasi-complete seperation.
 Similarly `arm::bayesglm()` uses a non-informative prior assumption
-to regularize the coefficients and pull them slightly towards zero. Gelman 
+to regularize the coefficients and pull them slightly towards zero. 
 \cite{gelman2008weakly} recommends to put a cauchy prior with median $0$ and 
 scale $2.5$ on each coefficient. This is how `arm::bayesglm()` solves
 the seperation problem.
