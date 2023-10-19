@@ -107,7 +107,7 @@ The model can be simplified ever further.
 As in \cite{hastie1990generalized}, we can see above that when we plot 
 the smooth terms against the effect on the log odds of `Kyphosis`
 that `Age` is approximately quadratic. `Start` can be divided into two groups, 
-the thoracic vertebrae $ start \leq 12$ and the lumbar vertebrae $ start > 12$. 
+the thoracic vertebrae $start \leq 12$ and the lumbar vertebrae $start > 12$. 
 This results in constant fit for thoracic group joined continuously fit to a 
 linear
 fit for the lumbar group 
@@ -391,7 +391,7 @@ summary(nb_model)
 The  coefficients, deviance and AIC between the two models are very similar. 
 However the dispersion parameter $\theta$ is exceptionally large. This means
 that the model is approaching a Poisson distribution. Therefore the suspicion
-of over dispersion because is probably not warranted because of the
+of over dispersion is probably not warranted because of the
 close to $1$ dispersion statistic from the poisson model and the results of the
 NB model.
 
@@ -412,7 +412,7 @@ summary(fit2)
 ```{r}
 X <- model.matrix(~ year + prev + offset(log(Area)), data = g_data)
 nll_fit3 <- function(params, data) {
-  # Given the structure of X, params should be unpacked into 4 beta coefficients
+  # Unpack params into 4 beta coefficients
   b0 <- params[1]  # Intercept
   b1 <- params[2]  # Coefficient for year2005
   b2 <- params[3]  # Coefficient for year2006
@@ -598,7 +598,6 @@ colnames(prev.profile) = c("Prevalence", "NLL")
 
 
 ```
-Sorry I spent too much time on this and need to move on. 
 
 ```{r}
 
@@ -633,6 +632,7 @@ cutoffs = c(0, qchisq(c(0.95, 0.99), 1)/2)
 
 ```
 These seem funny looking especially `prevalence` and the `intercept`. 
+Sorry I spent too much time on this and need to move on. 
 
 
 Now we compute the profile confidence intervals. 
@@ -761,13 +761,13 @@ bound to try to make the predicted probability of the outcome
 (`HG` being $1$ for $NV = 1$) as close to 1 as possible. 
 This is why the estimate of the effect of NV becomes infinite or very large
 for `glm()` with `method = "IWLS"`. Instead we can modify the score equation
-$ \partial log L  \partial \beta_{r} \equiv U(\beta_{r}) = 0$. Firth suggested 
+$$ \frac{\partial log L}{\partial \beta_{r}} \equiv U(\beta_{r}) = 0$$. Firth suggested 
 basing estimation on a modified score equation 
 $$U(\theta_r)^* \equiv U(\theta_{r+1}) = \frac{1}{2} \mathrm{trace} \left[ I(\theta)^{-1} \{\partial I(\theta) = \partial \theta_r\} \right] = 0 \quad (\text{for } r = 1, \ldots, k),$$
 This modified score function is connected to the penalized likelihood. 
 The penalized likelihood is essentially the original $L(\beta)$ plus a factor
-$\mid I(\beta) \mid ^\frac{1}{2}$ based on the information matrix $I(\beta)$ 
-refereed to as Jeffery's invariant prior. Jeffreys  prior is influential 
+$\mid I(\beta) \mid ^\frac{1}{2}$ based on the information matrix $I(\beta)$, 
+referred to as Jeffery's invariant prior. Jeffreys  prior is influential 
 for smaller sample sized and cases with separation but its influence diminishes
 as the sample size grows \cite{stackexchange_perfectseparation}. Firth 
 demonstrated that the bias, which is proportional to $\mathcal{O}(n^{-1})$, is
@@ -775,19 +775,19 @@ removed from the ML estimate.
 
 If instead we instead set `method = brglmFit"`  for `stats::glm()`, then 
 this utilizes Firths penalty of half the trace of a particular matrix product, 
-to adjust the parameters estimates in the case of our quasi-complete seperation.
+to adjust the parameters estimates in the case of our quasi-complete separation.
 Similarly `arm::bayesglm()` uses a non-informative prior assumption
 to regularize the coefficients and pull them slightly towards zero. 
-\cite{gelman2008weakly} recommends to put a cauchy prior with median $0$ and 
+\cite{gelman2008weakly} recommends to put a Cauchy prior with median $0$ and 
 scale $2.5$ on each coefficient. This is how `arm::bayesglm()` solves
-the seperation problem.
+the separation problem.
 
 Therefore in the above data we see that `glm` with the default method
 estimates `NV` $18.18$ with standard
-error $1.71e^{3}$ is extremely large compared to the other two methods. The 
-other parameters are very similar.
+error $1.71 \times 10^{3}$ is extremely large compared to the other two methods. 
+The other parameters are very similar.
 
-No we computeLRT's for each parameter for the two methods of glm(). 
+No we compute LRT's for each parameter for the two methods of glm(). 
 
 ```{r}
 # For fit_glm:
@@ -822,7 +822,7 @@ fit_brglm_reduced_NV <- glm(HG ~ PI + EH, family = binomial, data = endometrial,
                             method = "brglmFit")
 anova_brglm_NV <- anova(fit_brglm_reduced_NV, fit_brglm, test = "LRT")
 
-# You can then check the results using:
+# Check results:
 print(anova_glm_PI)
 print(anova_glm_EH)
 print(anova_glm_NV)
