@@ -97,6 +97,8 @@ cov_to_cor <- function(covmat) {
 }
 ```
 
+**BMB**: there's a built-in `cov2cor()` function ... 
+
 ```{r}
 corrplot::corrplot(cov_to_cor(cov(data)))
 ```
@@ -164,6 +166,10 @@ After we compute the principal components we will interpret them in terms of
 the original predictors. We will do PCA using both the covariance
 and the correlation matrix, so they can be compared downstream when fitting 
 the linear model. 
+
+**BMB**: in general I would avoid doing things "both ways". Sometimes OK for pedagogical purposes.  Usually only one or the other makes sense, and doing things both ways exposes you to snooping potential.  If units are different then PCA based on cov matrix **almost never** makes sense.
+
+**BMB**: PCA is OK. This *might* be an acceptable use of VIFs, although I generally don't like them ...
 
 ```{r,echo = FALSE}
 
@@ -558,6 +564,9 @@ Each column includes a single 1 for each of the 4 possible interactions.
 This means you can only estimate the interaction effect between `Period`
 and `Treatment`. 
 
+**BMB**: you did a good job describing how R's contrasts work, but you never set up the custom contrast matrix I asked for ...
+
+
 \newpage
 # 3
 
@@ -624,3 +633,7 @@ ggplot(results) +
                 RMSE and Power by the function f(x) = violation level * sd" ) +
   theme_minimal()
 ```
+
+**BMB**: I'm puzzled about your results; at a glance your code looks OK, but your coverage is uniformly terrible (it should be nominal at violation level = 1); BP test power should be 0.05 for violation level 1 and increase, etc.. Something funky going on there.
+
+Mark: 8 (you missed a big part of Q2, everything else looks OK
