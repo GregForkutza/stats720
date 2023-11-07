@@ -1,0 +1,421 @@
+---
+title: "Homework Assignment 2"
+author: |
+  | Greg Forkutza
+  | Student ID: 400277514
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  pdf_document:
+    citation_package: natbib
+    latex_engine: xelatex
+    toc: false
+    toc_depth: 2  
+fontsize: 10pt
+linestretch: 1.5
+geometry: margin=1in
+urlcolor: blue
+bibliography: a2.bib
+header-includes:
+  - "\\usepackage[nottoc]{tocbibind}"
+---
+
+```{r, warning = FALSE, message = FALSE, echo = FALSE}
+library(tidyverse)
+library(knitr)
+library(kableExtra)
+library(mlmRev)
+library(nlme)
+library(lme4)
+library(lmerTest)
+library(glmmTMB)
+library(broom.mixed)
+library(pbkrtest)
+```
+
+```{r, echo = FALSE}
+data <- Early
+data$age.scaled <- scale(data$age)
+```
+
+# a
+```{r, echo = FALSE, warning = FALSE, message = FALSE}
+set.seed(123)
+
+# Fit nlme::lme()
+mod.lme <- lme(cog ~ age.scaled + trt, 
+               random = ~ age.scaled | id, 
+               control = lmeControl(opt = "optim"),
+               data = data)
+
+# Fit lmeTest::lme()
+mod.lmer <- lmer(cog ~ age.scaled + trt + (1 + age.scaled | id), data = data)
+
+# Compare likelihood scores.
+
+  # Obtain llk scores model objects
+  lmer.llk <- logLik(mod.lmer) %>%  
+              as.numeric()  
+    lme.llk <- mod.lme$logLik
+  
+  # Compute differences
+  llk.diff <- all.equal(lmer.llk, lme.llk, tolerance = 0)
+  
+```
+Comparing the log-likelihoods, they are essentially equivalent (Mean relative difference: 0.0007723927), however `lmer.llk` > `lme.llk`.
+
+# b
+
+```{r, echo = FALSE}
+# Create coefficient plots
+
+  # Extract the original coefficients for fixed effects
+  fec.lme <- mod.lme$coefficients$fixed
+  fec.lmer <- fixef(mod.lmer)
+
+  # Tidy model output
+  tidy.lme <- tidy(mod.lme, effects = "fixed")
+  tidy.lmer <- tidy(mod.lmer, effects = "fixed")
+  
+  # Add a column to distinguish between models
+  tidy.lme$model <- "lme"
+  tidy.lmer$model <- "lmer"
+
+  # Combine the tidied data frames
+  combined_data <- rbind(tidy.lme, tidy.lmer)
+```
+
+```{r, echo = FALSE}
+  # Create an overlaid plot
+  ggplot(combined_data, aes(x = term, y = estimate, color = model)) +
+  geom_point(aes(shape = model), position = position_dodge(width = 0.3)) +  
+  geom_errorbar(aes(ymin = estimate - std.error, ymax = estimate + std.error),
+                position = position_dodge(width = 0.3), width = 0.2) +
+  theme_minimal() +
+  coord_flip() +
+  ggtitle("Fixed effects coefficients from lme and lmer models") +
+  scale_shape_manual(values = c(16, 17)) + 
+  theme(legend.title = element_blank())  
+
+```
+
+```{r, echo = FALSE}
+
+# Join model outputs
+comparison_data <- left_join(
+  tidy.lme,
+  tidy.lmer,
+  by = "term",
+  suffix = c("_lme", "_lmer")
+)
+
+# Apply all.equal to each comparison
+comparison_data$fec_estimate <- mapply(function(x, y) {
+  as.character(all.equal(x, y, tolerance = 0))
+}, comparison_data$estimate_lme, comparison_data$estimate_lmer)
+
+comparison_data$std_error <- mapply(function(x, y) {
+  as.character(all.equal(x, y, tolerance = 0))
+}, comparison_data$std.error_lme, comparison_data$std.error_lmer)
+
+
+# Select columns of interest
+result_df <- comparison_data %>% 
+  select(term, fec_estimate, std_error)
+
+kable(result_df, booktabs = TRUE, caption = 
+        "Difference in Estimated Fixed Effects Coefficents 
+      for mod.lme vs. mod.lmer") %>%
+  kable_styling(position = "center", latex_options = "hold_position")
+
+```
+
+```{r, echo = FALSE}
+# Compute Wald CIs for lme model
+comparison_data <- comparison_data %>%
+  mutate(
+    lower_limit_lme = estimate_lme - 1.96 * std.error_lme,
+    upper_limit_lme = estimate_lme + 1.96 * std.error_lme
+  )
+
+# Compute Wald CIs for lmer model
+comparison_data <- comparison_data %>%
+  mutate(
+    lower_limit_lmer = estimate_lmer - 1.96 * std.error_lmer,
+    upper_limit_lmer = estimate_lmer + 1.96 * std.error_lmer
+  )
+
+
+result_cis <- comparison_data %>%
+  select(term, 
+         estimate_lme, lower_limit_lme, upper_limit_lme, df_lme,
+         estimate_lmer, lower_limit_lmer, upper_limit_lmer, df_lmer) 
+
+result_cis_table <- result_cis %>%
+  as.data.frame() %>%
+  t()
+
+
+kable(result_cis_table, booktabs = TRUE, caption = 
+        "Estimated Fixed Effects with Wald CI's for mod.lme and mod.lmer") %>%
+  kable_styling(position = "center", 
+                latex_options = "hold_position",
+                font_size = 8)
+```
+
+
+```{r, echo = FALSE}
+diff_df_intcpt <- all.equal(tidy.lme$df[[1]], tidy.lmer$df[[1]], tolerance = 0)
+diff_df_age <- all.equal(tidy.lme$df[[2]], tidy.lmer$df[[2]], tolerance = 0)
+diff_df_trt <- all.equal(tidy.lme$df[[3]], tidy.lmer$df[[3]], tolerance = 0)
+diff_est_ll <- all.equal(result_cis$lower_limit_lme, 
+                         result_cis$lower_limit_lmer, tolerance = 0)
+diff_est_ul<- all.equal(result_cis$upper_limit_lme,
+                        result_cis$upper_limit_lmer, tolerance = 0)
+
+diff_values <- c(diff_df_intcpt,
+                 diff_df_age, 
+                 diff_df_trt, 
+                 diff_est_ll,
+                 diff_est_ul)
+names(diff_values) <- c("diff_df_intcpt",
+                        "diff_df_age", 
+                        "diff_df_trt",
+                        "diff_est_ll", 
+                        "diff_est_ul")
+
+
+diff_df <- data.frame(
+  Result = diff_values
+) 
+
+
+kable(diff_df, booktabs = TRUE, caption = " Difference between mod.lme vs.
+      mod.lmer for estimated denominator degrees of freedom and lower/upper 
+      limits for Wald CIs.") %>%
+  kable_styling(position = "center", latex_options = "hold_position")
+
+
+```
+
+We can see above above that the difference between `mod.lme` and `mod.lmer` for the estimated denominator degrees of freedom are different (tolerance > 0.1) for the `intercept` and `age`. They are very similar ($10^{-4}$ < tolerance < $10^{-2}$) for `trt`. The difference in the lower and upper limit for the Wald CI's are very similar.
+
+# c
+
+```{r, echo = FALSE}
+df_lmer_S <- (summary(mod.lmer, ddf="Satterthwaite")[[10]])[,3]
+df_lmer_KR <- (summary(mod.lmer, ddf = "Kenward-Roger")[[10]])[,3]
+
+df_data <- rbind(df_lmer_S,  df_lmer_KR)
+colnames(df_data) <- names(df_lmer_KR)
+df_data <- as.data.frame(df_data)
+
+diff_lmer_intcpt <- all.equal(df_lmer_S[1], df_lmer_KR[1], tolerance = 0)
+diff_lmer_age <- all.equal(df_lmer_S[2], df_lmer_KR[2], tolerance = 0)
+diff_lmer_trt <- all.equal(df_lmer_S[3], df_lmer_KR[3], tolerance = 0)
+
+diff_lmer_SvsKR <- c(diff_lmer_intcpt, diff_lmer_age, diff_lmer_trt)
+df_data <- rbind(df_data, diff_lmer_SvsKR)
+rownames(df_data)[3] <- "Differeance df S vs KR"
+colnames(df_data)[3] <- "trt"
+kable(df_data, caption =  "Comparison of estimated degrees of freedom for the 
+      lmer fit with the Satterthwaite vs. Kenward-Roger approximations.", 
+      booktabs = TRUE) %>%
+  kable_styling(position = "center",
+                latex_options = "hold_position",
+                font_size = 7)
+```
+
+The difference for `intercept` and `trt` are very similar. The difference for `age` is slightly different (0.01 < tolerance < 0.1). 
+The main roll of the ddf is in determining the critical values from t-distributions for hypothesis tests and constructing confidence intervals. 
+We can see the model summaries for the two methods of computing the ddf below:
+
+```{r}
+print((summary(mod.lmer, ddf="Satterthwaite"))[[10]])
+print((summary(mod.lmer, ddf = "Kenward-Roger"))[[10]])
+```
+
+
+We compute the Wald CI's below. We see that the difference in the width of the CI's for `intercept` and `trt` are slightly different. The difference in width for `age`is also slightly different but bordering on very similar. Given the magnitude of the parameter estimates it is not very important which method you choose for this example for computing the ddf. 
+
+```{r, echo = FALSE}
+K <- (summary(mod.lmer, ddf = "Kenward-Roger"))[[10]]
+S <- (summary(mod.lmer, ddf="Satterthwaite"))[[10]]
+
+# Kenward-Roger method CIs
+kr_t_values <- K[,4]  
+kr_ddf <- K[,3]
+
+kr_cis <- data.frame(
+  Term = c("(Intercept)", "age.scaled", "trtY"),
+  Lower_95_CI_KR = K[,1] - qt(0.975, kr_ddf) * K[,2],
+  Upper_95_CI_KR = K[,1] + qt(0.975, kr_ddf) * K[,2]
+)
+
+# Satterthwaite method CIs
+sw_t_values <- S[,4] 
+sw_ddf <- S[,3]
+sw_estimates <- S[,1]
+sw_std_errors <- S[,2]
+
+sw_cis <- data.frame(
+  Term = c("(Intercept)", "age.scaled", "trtY"),
+  Lower_95_CI_SW = sw_estimates - qt(0.975, sw_ddf) * sw_std_errors,
+  Upper_95_CI_SW = sw_estimates + qt(0.975, sw_ddf) * sw_std_errors
+)
+
+# Combining into one dataframe
+combined_cis <- data.frame(
+  Term = c("(Intercept)", "age.scaled", "trtY"),
+  Lower_95_CI_KR = kr_cis$Lower_95_CI_KR,
+  Upper_95_CI_KR = kr_cis$Upper_95_CI_KR,
+  Lower_95_CI_SW = sw_cis$Lower_95_CI_SW,
+  Upper_95_CI_SW = sw_cis$Upper_95_CI_SW
+)
+
+# Calculate width of CIs
+combined_cis$Width_CI_KR <- combined_cis$Upper_95_CI_KR - 
+  combined_cis$Lower_95_CI_KR
+combined_cis$Width_CI_SW <- combined_cis$Upper_95_CI_SW - 
+  combined_cis$Lower_95_CI_SW
+combined_cis$Diff_Width <- combined_cis$Width_CI_KR - combined_cis$Width_CI_SW
+
+kable(combined_cis, caption =  "Comparison of Wald CI's based on the estimated 
+      degrees of freedom for the 
+      lmer fit with the Satterthwaite vs. Kenward-Roger approximations.", 
+      booktabs = TRUE) %>%
+  kable_styling(position = "center",
+                latex_options = "hold_position",
+                font_size = 6)
+```
+
+# d
+
+```{r, echo = FALSE}
+# Extract random effects
+ran_ef_tidy <- tidy(mod.lmer, effects = "ran_vals")
+ran_intercepts <- ran_ef_tidy[ran_ef_tidy$group == "id" & 
+                                ran_ef_tidy$term == "(Intercept)",] %>%
+  select(level, term, estimate)
+ran_slopes <- ran_ef_tidy[ran_ef_tidy$group == "id" &
+                            ran_ef_tidy$term == "age.scaled",] %>%
+  select(level, term, estimate)
+
+# Merge into a single df by id
+ran_effects <- merge(ran_intercepts, ran_slopes, by = "level") %>%
+  select(-c(term.x, term.y))
+names(ran_effects) <- c("id",
+                        "intercept", 
+                        "age_slope")
+
+ggplot(ran_effects, aes(x = age_slope, y = intercept)) +
+  geom_point() +
+  labs(x = "Random Slope for Age", y = "Random Intercept") +
+  theme_minimal() +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red") +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "red") +
+  ggtitle("Random Effects of Age (Deviation of the Slope from 
+          Population-Level Slope) vs.  Corresponding Random Intercept")
+```
+
+# e
+
+`trt` is a treatment that is a applied to 58/103 infants. The treatment is deliberately applied to test its effect.
+It is not a naturally occurring variation in the population. This is a deliberate manipulation and not a random sample. If `trt` were a random effect, it would
+imply we were interested in generalizing the results to an entire population of potential treatments, which is not the case here asa we wish to generalize about the effect
+of the treatment itself. Therefore treatment should be considered a fixed effect because it allows for the estimation of the specific effect of the early childhood intervention program
+on the numeric cognitive score of infants. 
+
+
+# f
+
+Fitting a model like `cog ~ 1 +trt + (1 + age | id)` implies we are not including a fixed effect of age. There is no baseline or average effect of `age` on `cog` for the population. The random slope
+would instead represent random variation around an unspecified (probably implicitly zero?) average slope. It is unclear what the individual deviations are relative to. It also means that some of the variation 
+due to fixed effect of age is being incorrectly attributed to the random effect of `age` and the fixed effect of `trt`. Therefore by not including a fixed effect for `age` we would be saying that there is no average effect of `age` on `cog`. This is a strongly counter intuitive statement about the nature of the relationship between age and cognitive ability.
+
+
+# g
+
+By fitting a reduced model with random intercept only, we are testing the assumption that while the cognitive ability may start at different baselines for different individuals (captured by the random intercepts), it changes with age at the same rate across all individuals (since there's no random slope for age). 
+```{r, echo = FALSE}
+# Fit reduced model with independent slopes and intercepts
+mod.reduced.ind <- lmer(cog ~ age.scaled + trt + (1 | id) + (0 + age.scaled | id),
+                        data = data, REML = TRUE)
+
+# Fit the reduced model with random intercepts only:
+mod.reduced.int.only <- lmer(cog ~ age.scaled + trt + (1 | id), data = data, 
+                             REML = TRUE)
+
+# 
+lrt.result <- anova(mod.lmer, mod.reduced.ind, mod.reduced.int.only)
+print(lrt.result)
+```
+
+The comparison of `mod.reduced.ind` with `mod.reduced.int.only` yields a very high p value (0.75883), suggesting that the added independent random slopes for `age` does not significantly improve the model fit.
+The comparison of `mod.lmer` with `mod.reduced.ind` shows a significant improvement in fit with a very small p-value (0.01963), indicating that allowing random slopes for `age` to correlate with the intercepts significantly improves the model. `mod.lmer` also has the largest AIC value but with a very small increase of 0.3 over the independent model and an increase of 5.9 compared to the intercept only model.
+Therefore based on the above output, the model with the correlated random slopes and intercepts
+`mod.lmer` is the best fitting model according to both AIC and the LRT.
+
+I tried to write my own function to do parametric bootstrapping but the p-value didn't agree with the results of `pbkrtest::PBmodcomp` below. I couldn't think of how to debug this. If there are any obvious issues 
+I would love to know. You can run bootstrap1 and bootstrap2 to see but it is very slow. Also curious how you do this faster. 
+```{r, warning =  FALSE, eval = FALSE}
+set.seed(123)
+
+# Define function to implement parametric bootstrap for LRT
+lrt.bootstrap <- function(mod.full, mod.reduced, data, response, n) {
+  response <- deparse(substitute(response))  
+  bootstrap_lrt <- numeric(n) 
+  for (i in 1:n) {
+    # Simulate data
+    sim_data <- simulate(mod.full)
+    
+    # Update data with simulated response
+    new_data <- data
+    new_data[[response]] <- sim_data[[1]]
+    
+    # Fit both models to simulated data
+    mod.full.boot <- update(mod.full, data = new_data)
+    mod.reduced.boot <- update(mod.reduced, data = new_data)
+    
+    # Compute and store LRT 
+    bootstrap_lrt[i] <- 2 * (logLik(mod.full.boot) - logLik(mod.reduced.boot))
+  }
+#  Calculate the  original LRT statistic 
+original_lrt <- 2 * (logLik(mod.full) - logLik(mod.reduced))
+
+# Compute p-value
+p_value <- mean(bootstrap_lrt >= original_lrt)
+
+# Define output as list  
+output <- list(bootstrap_lrt, original_lrt, p_value)
+  
+  return(output)
+}
+
+# Bootstrap of correlated model with independent intercept and slope model
+bootstrap1 <- lrt.bootstrap(mod.lmer,
+                                      mod.reduced.ind,
+                                      data = data,
+                                      response = cog,
+                                      n = 1000)
+
+# Bootstrap of independent model and int only model
+bootstrap2 <- lrt.bootstrap(mod.reduced.ind,
+                                      mod.reduced.int.only,
+                                      data = data,
+                                      response = cog,
+                                      n = 1000)
+
+```
+
+
+```{r, warning = FALSE, message = FALSE}
+ PB1 <- PBmodcomp(mod.lmer, mod.reduced.ind, 1000)
+ PB2 <- PBmodcomp(mod.reduced.ind, mod.reduced.int.only, 1000)
+ print(PB1)
+ print(PB2)
+```
+In the second comparison, the model with the independent slope/intercept is very close to a boundary condition where 
+the variance of the random slope could be zero, indicated by a high number of extreme values (extremes = 351). This suggests a skewed or highly variable bootstrap test statistic distribution. This skewness implies that the random slopes contribute little additional variance. Standard LRTs assume a chi-squared distribution for the test statistic, which isn't valid at this boundary since variance cannot be negative. Consequently, the test statistic distribution becomes a skewed mixture, violating Wilk's Theorem. If the actual variance component is zero or close to it, the LRT statistic's distribution may deviate significantly from the chi-squared distribution, often resulting in a skewed, heavier-tailed distribution.
+
+In the first comparison, both models include random slopes so they are less likely to be on the boundary of the parameter space where the random slope variance is zero. 
+
