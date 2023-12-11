@@ -190,7 +190,7 @@ final_plot0 <- base_plot +
     geom_ribbon(data = pp0, aes(x = x, ymin = conf.low, ymax = conf.high, fill = group), alpha = 0.2, inherit.aes = FALSE) + 
     theme_minimal() +
     labs(title = "Predicted Probabilities of Use by Age", x = "Age", y = "Probability of Use") +
-    scale_linetype_discrete(name = "Urban") +  # Rename linetype legend
+    scale_linetype_discrete(name = "Urban") + 
     scale_fill_discrete(name = "Urban") +
      stat_summary(data = Contraception,
                aes(x = age, y = use, colour = livch, shape = urban),
@@ -206,7 +206,7 @@ final_plot1 <- base_plot +
     geom_ribbon(data = pp1, aes(x = x, ymin = conf.low, ymax = conf.high, fill = group), alpha = 0.2, inherit.aes = FALSE) + 
     theme_minimal() +
     labs(title = "Predicted Probabilities of Use by Age with type=Random", x = "Age", y = "Probability of Use") +
-    scale_linetype_discrete(name = "Urban") +  # Rename linetype legend
+    scale_linetype_discrete(name = "Urban") + 
     scale_fill_discrete(name = "Urban") +
     stat_summary(data = Contraception,
                aes(x = age, y = use, colour = livch, shape = urban),
@@ -480,7 +480,7 @@ theta <- 1
 n <- 500
 ngrp <- 100
 num_simulations <- 100
-nAGQ_values <- c(-2, -1, 1, 2) # Assuming 20 for higher nAGQ value instead of 2 for clearer distinction
+nAGQ_values <- c(-2, -1, 1, 2) 
 
 # Function to run simulations and extract estimates
 run_simulations <- function(beta, nAGQ) {
