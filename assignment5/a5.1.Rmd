@@ -1,0 +1,308 @@
+---
+title: "Homework Assignment 4"
+author: |
+  | Greg Forkutza
+  | Student ID: 400277514
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: 
+  pdf_document:
+    extra_dependencies: ["flafter"]
+    citation_package: natbib
+    latex_engine: xelatex
+    toc: false
+    toc_depth: 2  
+fontsize: 10pt
+linestretch: 1.5
+geometry: margin=1in
+urlcolor: blue
+bibliography: a2.bib
+header-includes:
+  - "\\usepackage[nottoc]{tocbibind}"
+  - "\\usepackage{float}"
+---
+
+```{r, echo = FALSE, message = FALSE, warning = FALSE}
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(knitr)
+library(kableExtra)
+library(gridExtra)
+library(mgcv)
+library(lme4)
+library(broom)
+library(broom.mixed)
+library(dotwhisker)
+library(ggeffects)
+library(future)
+library(future.apply)
+
+knitr::opts_chunk$set(fig.pos = "H", out.extra = "", echo = FALSE)
+```
+
+
+
+```{r}
+data("Contraception", package = "mlmRev")
+Contraception <- transform(Contraception,
+                           use_n = as.numeric(use) - 1,
+                           age_sc = drop(scale(age)))
+
+```
+
+# 1
+
+```{r}
+# Fit glmer model 
+mod_glmer <- glmer(use_n ~ age_sc + urban + age_sc:urban + (1|district),  data = Contraception, family = binomial)
+
+# Fit GAM model
+mod_gam <- mgcv::gam(use_n ~ age_sc + urban + age_sc:urban + s(district,bs = "re"), family = binomial, data = Contraception)
+
+```
+
+```{r}
+# Construct table to compare values
+
+  # Extract coefficients and standard errors
+  glmer_coefs <- summary(mod_glmer)$coefficients[2:4,]
+  
+  gam_summary<- mgcv::summary.gam(mod_gam)
+  gam_coefs <- gam_summary$p.coeff[2:4]
+  gam_se <- gam_summary$se[2:4]  
+
+  # Create data frames for each model
+  df_glmer <- data.frame(Estimate_glmer = glmer_coefs[, "Estimate"], StdError_glmer = glmer_coefs[, "Std. Error"])
+  df_gam <- data.frame(Estimate_gam = gam_coefs, StdError_gam = gam_se)
+  
+  # Calculate differences
+  df_diff <- data.frame(EstimateDiff = df_gam$Estimate_gam - df_glmer$Estimate_glmer, 
+                      StdErrorDiff = df_gam$StdError_gam - df_glmer$StdError_glmer)
+
+  # Combine into asingle df
+  comparison_df <- data.frame(df_glmer, df_gam, df_diff)
+  
+  # Display table
+  kable(comparison_df, caption = "Comparison of fitting gam() and glmer() to the mlmRev::contraception dataset. The response use is covnerted to a binary numeric factor and age is scaled and centered.  The fixed effects are age and urban and their interaction. Random effects include a random interecpt for the district. The difference is computed relative to the gam fit.") %>%
+    kable_styling(position = "center", font_size =  8)
+```
+
+In table 1 we see the results of the two different models. Comparing the difference in coefficients and standard error estimates, we see that for the two non interaction terms `glmer` overestimates compared to the `gam` fit and underestimates for the interaction terms coefficients and overestimates for the standard error. Looking at the magnitude of the differences, which were computed relative to the `gam` fit, we see that that the non interaction terms coefficient estimates are very similar and their standard errors are practically identical. The same is true for the interaction term accept that the coefficient estimate is an order of magnitude closer more similar. 
+
+`gam` uses IRLS and `glmer` uses Laplace Approximation (LA). IRLS is robust to estimating complex, non-linear effects, which might explain the slightly lower estimates for the interaction term. LA is has conservative estimates when dealing with complex interactions or non-linearities, potentially leading to the observed slight overestimation in non-interaction terms. 
+  
+  
+# 2
+
+```{r}
+# Fit gam with a fixed quadratic function of age without the interaction term
+mod_gam_quad <- mgcv::gam(use_n ~ poly(age_sc, 2) + urban + s(district,bs = "re"), family = binomial, data = Contraception)
+
+# Fit gam with the effect of age as a thin-plate spline
+mod_gam_tps <- mgcv::gam(use_n ~ s(age_sc, bs = "tp") + urban + s(district,bs = "re"), family = binomial, data = Contraception)
+
+# Plot predictions for each model with binned proportions/binomial CIs
+
+  # Define function to commpute upper and lower confidence bounds for prediction estimates of binomially distributed response data
+  binom_sum <- function(x, alpha = 0.05) {
+    n <- length(x); x <- sum(x)
+    est <- x/n
+    lwr <- qbeta(alpha/2, x, n-x+1)
+    zvals <- !is.na(x) & x == 0
+    nvals <- !is.na(x) & x == n
+    lwr[zvals] <- 0
+    lwr[nvals] <- (alpha/2)^(1/n[nvals])
+    upr <- qbeta(1-alpha/2, x+1, n-x)
+    upr[zvals] <- 1-(alpha/2)^(1/n[zvals])
+    upr[nvals] <- 1
+    data.frame(y=est, ymin=lwr, ymax=upr)
+  }
+  
+    # Create bins using the unscaled age
+  Contraception$age_sc_bin <- cut(Contraception$age_sc, breaks = pretty(range(Contraception$age_sc), n = 15))
+  
+
+ 
+
+  # Calculate observed proportions and CIs for each bin
+  Contraception_binned <- Contraception %>% 
+    group_by(age_sc_bin) %>%
+    summarize(binomial_sumamry = list(binom_sum(use_n))) %>%
+    unnest(binomial_sumamry)
+
+
+Contraception_predictions <- Contraception %>%
+  group_by(age_sc_bin) %>%
+  do({
+    data.frame(
+      mean_Predictions_Quadratic = predict(mod_gam_quad, newdata = ., type = "response"),
+      se_Quadratic = predict(mod_gam_quad, newdata = ., type = "response", se.fit = TRUE)$se.fit,
+      mean_Predictions_ThinPlateSplines = predict(mod_gam_tps, newdata = ., type = "response"),
+      se_ThinPlateSplines = predict(mod_gam_tps, newdata = ., type = "response", se.fit = TRUE)$se.fit
+    )
+  }) %>%
+  summarize(
+    mean_Predictions_Quadratic = mean(mean_Predictions_Quadratic),
+    se_Quadratic = sqrt(mean(se_Quadratic^2)),
+    mean_Predictions_ThinPlateSplines = mean(mean_Predictions_ThinPlateSplines),
+    se_ThinPlateSplines = sqrt(mean(se_ThinPlateSplines^2))
+  )
+
+
+Contraception_predictions <- Contraception_predictions %>%
+  mutate(
+    lower_CI_Quadratic = mean_Predictions_Quadratic - 1.96 * se_Quadratic,
+    upper_CI_Quadratic = mean_Predictions_Quadratic + 1.96 * se_Quadratic,
+    lower_CI_ThinPlateSplines = mean_Predictions_ThinPlateSplines - 1.96 * se_ThinPlateSplines,
+    upper_CI_ThinPlateSplines = mean_Predictions_ThinPlateSplines + 1.96 * se_ThinPlateSplines
+  )
+```
+
+```{r, fig.cap= "The figure displays observed and predicted probabilities of contraceptive use based on the Contraception dataset. The black bars represent the binned proportions of contraceptive use, with confidence intervals (CIs) calculated using beta quantiles. These observed proportions are juxtaposed against two predictive models. Both models include 'urban' as a fixed effect and 'district' as a random intercept, but they differ in how the age variable is treated. The 'Quad Model' employs a quadratic polynomial to model the fixed effect of scaled and centered age, while the 'TPS Model' uses a thin-plate spline for the same purpose. The curves on the plot indicate the mean predicted probabilities for each age bin, as estimated by mgcv::gam."}
+ggplot() + 
+  geom_errorbar(data = Contraception_binned, aes(x = age_sc_bin, ymin = ymin, ymax = ymax), width = 0.1) +
+  geom_point(data = Contraception_binned, aes(x = age_sc_bin, y = y), size = 3) +
+  geom_line(data = Contraception_predictions, aes(x = age_sc_bin, y = mean_Predictions_Quadratic, color = "Quadratic Model", group = 1), alpha = 1) +
+  geom_line(data = Contraception_predictions, aes(x = age_sc_bin, y = mean_Predictions_ThinPlateSplines, color = "TPS Model", group = 1), alpha = 1) +
+  geom_ribbon(data = Contraception_predictions, aes(x = age_sc_bin, ymin = lower_CI_Quadratic, ymax = upper_CI_Quadratic, fill = "Quadratic Model"), alpha = 0.1, group =1) +
+  geom_ribbon(data = Contraception_predictions, aes(x = age_sc_bin, ymin = lower_CI_ThinPlateSplines, ymax = upper_CI_ThinPlateSplines, fill = "TPS Model"), alpha = 0.2, group = 1) +
+  scale_color_manual(values = c("Quadratic Model" = "darkblue", "TPS Model" = "darkred")) + 
+  scale_fill_manual(values = c("Quadratic Model" = "lightblue", "TPS Model" = "pink")) +  
+  labs(x = "Age (Years as Difference From Sample Mean", y = "Probability/Proportion", color = "Model Predictions", fill = "Confidence Interval") +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    axis.text.x = element_text(size = 4) 
+    )
+```
+
+
+# 3
+
+```{r}
+# Fit gam with a fixed quadratic function of age without the interaction term
+mod4 <- mgcv::gam(use_n ~ poly(age_sc, 2) + urban + poly(age_sc, 2):urban + s(district,bs = "re"), family = binomial, data = Contraception)
+
+# Fit gam with the effect of age as a thin-plate spline
+mod5 <- mgcv::gam(use_n ~ s(age_sc, bs = "tp") + s(age_sc, bs = "tp", by = urban) + s(district,bs = "re"), family = binomial, data = Contraception)
+
+# Plot predictions for each model with binned proportions/binomial CIs
+ 
+Contraception_predictions2 <- Contraception %>%
+  group_by(age_sc_bin) %>%
+  do({
+    data.frame(
+      mean_Predictions_Quadratic = predict(mod4, newdata = ., type = "response"),
+      se_Quadratic = predict(mod_gam_quad, newdata = ., type = "response", se.fit = TRUE)$se.fit,
+      mean_Predictions_ThinPlateSplines = predict(mod5, newdata = ., type = "response"),
+      se_ThinPlateSplines = predict(mod_gam_tps, newdata = ., type = "response", se.fit = TRUE)$se.fit
+    )
+  }) %>%
+  summarize(
+    mean_Predictions_Quadratic = mean(mean_Predictions_Quadratic),
+    se_Quadratic = sqrt(mean(se_Quadratic^2)),
+    mean_Predictions_ThinPlateSplines = mean(mean_Predictions_ThinPlateSplines),
+    se_ThinPlateSplines = sqrt(mean(se_ThinPlateSplines^2))
+  )
+
+
+Contraception_predictions2 <- Contraception_predictions2 %>%
+  mutate(
+    lower_CI_Quadratic = mean_Predictions_Quadratic - 1.96 * se_Quadratic,
+    upper_CI_Quadratic = mean_Predictions_Quadratic + 1.96 * se_Quadratic,
+    lower_CI_ThinPlateSplines = mean_Predictions_ThinPlateSplines - 1.96 * se_ThinPlateSplines,
+    upper_CI_ThinPlateSplines = mean_Predictions_ThinPlateSplines + 1.96 * se_ThinPlateSplines
+  )
+```
+
+```{r, fig.cap= "The figure displays observed and predicted probabilities of contraceptive use based on the Contraception dataset. The black bars represent the binned proportions of contraceptive use, with confidence intervals (CIs) calculated using beta quantiles. These observed proportions are juxtaposed against two predictive models. Both models include 'urban' as a fixed effect and 'district' as a random intercept. The 'Mod4' includes an additional interaction between a quadratic polynomial of age and urban status. 'Mod5' uses a split thin-plate spline term for urban status. The curves on the plot indicate the mean predicted probabilities for each age bin, as estimated by mgcv::gam."}
+ggplot() + 
+  geom_errorbar(data = Contraception_binned, aes(x = age_sc_bin, ymin = ymin, ymax = ymax), width = 0.1) +
+  geom_point(data = Contraception_binned, aes(x = age_sc_bin, y = y), size = 3) +
+  geom_line(data = Contraception_predictions2, aes(x = age_sc_bin, y = mean_Predictions_Quadratic, color = "Mod4", group = 1), alpha = 1) +
+  geom_line(data = Contraception_predictions2, aes(x = age_sc_bin, y = mean_Predictions_ThinPlateSplines, color = "Mod5", group = 1), alpha = 1) +
+  geom_ribbon(data = Contraception_predictions2, aes(x = age_sc_bin, ymin = lower_CI_Quadratic, ymax = upper_CI_Quadratic, fill = "Mod4"), alpha = 0.1, group =1) +
+  geom_ribbon(data = Contraception_predictions2, aes(x = age_sc_bin, ymin = lower_CI_ThinPlateSplines, ymax = upper_CI_ThinPlateSplines, fill = "Mod5"), alpha = 0.2, group = 1) +
+  scale_color_manual(values = c("Mod4" = "darkblue", "Mod5" = "darkred")) + 
+  scale_fill_manual(values = c("Mod4" = "lightblue", "Mod5" = "pink")) +  
+  labs(x = "Age (Years as Difference From Sample Mean", y = "Probability/Proportion", color = "Model Predictions", fill = "Confidence Interval") +
+  theme_minimal() +
+    theme(
+    legend.position = "bottom",
+    axis.text.x = element_text(size = 4) 
+    )
+```
+
+# 4
+
+The  `gam()` model failed to converge with the default `optimizer = "bobyqa"` or `optimizer = "NelderMead"`. It converged for `optimizer = '"bobyqa"` and when I increased the number of iterations to $1e5$. 
+
+I struggled with getting the standard errors for the predictions for glmer model using predict. I dont think its possible to extract the standard error from using `predict` on a `glmer` model? I tried using `lme4::bootMer` to bootstrap some samples and compute confidence intervals but it took almost 20 minutes and then it was all NA. So I said no to trying to get that to work. So thats why the plot for this question does not have CI's for the predictions. 
+
+```{r, eval = FALSE}
+# fit a glmer() model that includes a fixed quadratic-age by urban/rural interaction and a random effect that allows the quadratic effect of age to vary across districts 
+mod_glmer2 <- glmer(use_n ~ urban * poly(age_sc, 2) + (poly(age_sc, 2) | district), 
+                    data = Contraception, 
+                    family = binomial, 
+                    control = glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 1e5)))
+
+
+# Fit a gam() model that includes different population-level smooths for urban vs rural (using the by= specification from the previous model) plus different age-smooths for each district (using a factor smooth basis.
+mod_gam3 <- gam(use_n ~ s(age_sc, bs = "tp", by = urban) + s(age_sc, district, bs = "fs"),
+                data = Contraception, 
+                family = binomial, 
+                control = gam.control(trace = TRUE, nthreads = 10)
+                )
+```
+
+```{r}
+# Load models because they are slow to compute on the fly when rendering
+mod_glmer2 <- readRDS(file = "models_q4_glmer.rds")
+mod_gam3 <- readRDS(file = "models_q4_gam.rds")
+
+# Construct new data frame
+nd <- with(Contraception,
+           expand.grid(urban = levels(urban),
+                       age_sc = unique(age_sc),
+                       district = unique(district)))
+
+# Creating bins for scaled and centered age
+Contraception$age_sc_bin <- cut(Contraception$age_sc, breaks = pretty(range(Contraception$age_sc), n = 17))
+
+# Calculate observed proportions and CIs
+Contraception_binned_sc <- Contraception %>%
+  group_by(age_sc_bin) %>%
+  summarize(binomial_summary = list(binom_sum(use_n))) %>%
+  unnest(binomial_summary)
+  
+# Generate predictions 
+nd$pred_glmer2 <- predict(mod_glmer2, newdata = nd, type = "response")
+nd$pred_gam3 <- predict(mod_gam3, newdata = nd, type = "response")
+
+
+# Create bins for nd
+nd$age_sc_bin <- cut(nd$age_sc, breaks = pretty(range(Contraception$age_sc), n = 17))
+
+# Aggregate model preconditions by bin
+Contraception_predictions_new <- nd %>%
+  group_by(age_sc_bin) %>%
+  summarize(mean_Predictions_GLMER2 = mean(pred_glmer2), mean_Predictions_GAM3 = mean(pred_gam3))
+```
+
+```{r, fig.cap = "The figure displays observed and predicted probabilities of contraceptive use based on the Contraception dataset. The black bars represent the binned proportions of contraceptive use, with confidence intervals (CIs) calculated using beta quantiles. These observed proportions are juxtaposed against two predictive models. This figure is different than the previous figures in that it used the scaled and centered age predictor to plot the predictions. The 'GMLER2' model includes a fixed quadratic-age by urban-rural interaction and a random effect that allows the quadratic effect of age to vary across districts. The 'GAM3' model includes different population-level smooths for urban vs rural plus different age-smooths for each district. The curves on the plot indicate the mean predicted probabilities for each age bin, as estimated by gam() and glm()."}
+# Plot binned probabilites with Cis and predicted curves for both models
+ggplot() +
+  geom_errorbar(data = Contraception_binned_sc, aes(x = age_sc_bin, ymin = ymin, ymax = ymax), width = 0.1) +
+  geom_point(data = Contraception_binned_sc, aes(x = age_sc_bin, y = y), size = 3) +
+  geom_line(data = Contraception_predictions_new, aes(x = age_sc_bin, y = mean_Predictions_GLMER2, color = "GLMER2 Model", group = 1)) +
+  geom_line(data = Contraception_predictions_new, aes(x = age_sc_bin, y = mean_Predictions_GAM3, color = "GAM3 Model", group = 1)) +
+  scale_x_discrete(name = "Age (Years as Difference From Sample Mean)") +
+  scale_color_manual(values = c("GLMER2 Model" = "blue", "GAM3 Model" = "red")) +
+  labs(y = "Probability/Proportion", color = "Model Predictions") +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    axis.text.x = element_text(size = 4) 
+  )
+
+```
